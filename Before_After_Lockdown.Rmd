@@ -1,0 +1,460 @@
+---
+title: "before"
+output: html_document
+date: '2022-04-26'
+---
+# Loading the package
+```{r}
+library(dplyr)
+library(lubridate)
+#Read-in the dataset
+setwd("C:/Users/white/Desktop/")
+df= read.csv('Corona_NLP.csv')
+#Filter out the usable TweetAt rows
+df_t=df %>% filter(grepl('/2020', TweetAt))
+df_t=df_t %>% filter(!grepl('i', TweetAt))
+df_t=df_t %>% filter(!grepl(',', TweetAt))
+#Filter out the usable columns
+df= df_t %>% select(ScreenName, TweetAt, OriginalTweet)
+```
+# Change Tweet at to Date format
+```{r}
+str(df)
+df$TweetAt= strptime(as.character(df$TweetAt), "%d/%m/%Y")
+
+
+#Schools in America removed to remote from at March 15 2020
+#Subset the tweets before and after March 15 2020
+before_ld= df[df$TweetAt < ymd(20200315),]
+str(before_ld)
+after_ld= df[df$TweetAt > ymd(20200315),]
+str(after_ld)
+```
+
+#ncr sentiment
+#before lock down
+```{r}
+library(wordcloud)
+library(lexicon)
+library(magrittr)
+library(tidytext)
+library(ggplot2)
+library(ggthemes)
+library(tidyr)
+nrc = read.table(file = 'https://raw.githubusercontent.com/pseudorational/data/master/nrc_lexicon.txt',
+                 header = F,
+                 col.names = c('word','sentiment','num'),
+                 sep = '\t',
+                 stringsAsFactors = F)
+nrc = nrc[nrc$num!=0,]
+nrc$num = NULL
+```
+
+```{r}
+before_ld %>%
+  select(ScreenName, OriginalTweet)%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output = word, input = OriginalTweet)%>%
+  inner_join(y = hash_sentiment_nrc,by = c('word'='x'))%>%
+  ungroup()%>%
+  group_by(y)%>%
+  summarize(count = n())%>%
+  ungroup()
+#Before Lock down 3487 -1  5345 +1
+```
+# top 25 high frequency word
+```{r}
+before_ld%>%			
+  unnest_tokens(input = OriginalTweet, output = word)%>%
+  select(word)%>%
+  anti_join(stop_words)%>%
+  group_by(word)%>%
+  summarize(count = n())%>%
+  ungroup()%>%
+  arrange(desc(count))%>%
+  top_n(25)
+```
+# top 25 high frequency word  graph
+```{r}
+before_ld%>%
+  unnest_tokens(input = OriginalTweet, output = word)%>%
+  select(word)%>%
+  anti_join(stop_words)%>%
+  group_by(word)%>%
+  summarize(count = n())%>%
+  ungroup()%>%
+  arrange(desc(count))%>%
+  top_n(25)%>%
+  ggplot(aes(x=reorder(word,count), y=count, fill=count))+
+  geom_col()+
+  xlab('words')+
+  coord_flip()
+```
+# ncr visual
+```{r}
+before_ld%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output = word, input = OriginalTweet)%>%
+  inner_join(nrc)%>%
+  group_by(sentiment)%>%
+  count()%>%
+  ggplot(aes(x=reorder(sentiment,X = n), y=n, fill=sentiment))+
+  geom_col()+
+  guides(fill=F)+
+  coord_flip()+
+  theme_wsj()
+```
+# after lock down
+```{r}
+after_ld %>%
+  select(ScreenName, OriginalTweet)%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output = word, input = OriginalTweet)%>%
+  inner_join(y = hash_sentiment_nrc,by = c('word'='x'))%>%
+  ungroup()%>%
+  group_by(y)%>%
+  summarize(count = n())%>%
+  ungroup()
+#-1 26449   +1 40518
+```
+# top 25 high frequency word
+```{r}
+after_ld%>%			
+  unnest_tokens(input = OriginalTweet, output = word)%>%
+  select(word)%>%
+  anti_join(stop_words)%>%
+  group_by(word)%>%
+  summarize(count = n())%>%
+  ungroup()%>%
+  arrange(desc(count))%>%
+  top_n(25)
+```
+# top 25 high frequency word  graph
+```{r}
+after_ld%>%
+  unnest_tokens(input = OriginalTweet, output = word)%>%
+  select(word)%>%
+  anti_join(stop_words)%>%
+  group_by(word)%>%
+  summarize(count = n())%>%
+  ungroup()%>%
+  arrange(desc(count))%>%
+  top_n(25)%>%
+  ggplot(aes(x=reorder(word,count), y=count, fill=count))+
+  geom_col()+
+  xlab('words')+
+  coord_flip()
+```
+# ncr visual
+```{r}
+after_ld%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output = word, input = OriginalTweet)%>%
+  inner_join(nrc)%>%
+  group_by(sentiment)%>%
+  count()%>%
+  ggplot(aes(x=reorder(sentiment,X = n), y=n, fill=sentiment))+
+  geom_col()+
+  guides(fill=F)+
+  coord_flip()+
+  theme_wsj()
+```
+# afinn
+```{r}
+afinn = read.table('https://raw.githubusercontent.com/pseudorational/data/master/AFINN-111.txt',
+                   header = F,
+                   quote="",
+                   sep = '\t',
+                   col.names = c('word','value'), 
+                   encoding='UTF-8',
+                   stringsAsFactors = F)
+```
+# sentiment visual
+# before lockdown
+```{r}
+before_ld %>%
+  select(ScreenName,OriginalTweet)%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output=word,input=OriginalTweet)%>%
+  inner_join(afinn)%>%
+  summarize(reviewSentiment = mean(value))%>%
+  ungroup()%>%
+  summarize(min=min(reviewSentiment),
+            max=max(reviewSentiment),
+            median=median(reviewSentiment),
+            mean=mean(reviewSentiment))
+```
+
+```{r}
+before_ld %>%
+  select(ScreenName,OriginalTweet)%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output=word,input=OriginalTweet)%>%
+  inner_join(afinn)%>%
+  summarize(reviewSentiment = mean(value))%>%
+  ungroup()%>%
+  ggplot(aes(x=reviewSentiment,fill=reviewSentiment>0))+
+  geom_histogram(binwidth = 0.1)+
+  scale_x_continuous(breaks=seq(-5,5,1))+
+  scale_fill_manual(values=c('tomato','seagreen'))+
+  guides(fill=F)+
+  theme_wsj()
+```
+# sentiment visual
+# after lock down
+```{r}
+after_ld %>%
+  select(ScreenName,OriginalTweet)%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output=word,input=OriginalTweet)%>%
+  inner_join(afinn)%>%
+  summarize(reviewSentiment = mean(value))%>%
+  ungroup()%>%
+  summarize(min=min(reviewSentiment),
+            max=max(reviewSentiment),
+            median=median(reviewSentiment),
+            mean=mean(reviewSentiment))
+
+```
+
+```{r}
+
+after_ld %>%
+  select(ScreenName,OriginalTweet)%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output=word,input=OriginalTweet)%>%
+  inner_join(afinn)%>%
+  summarize(reviewSentiment = mean(value))%>%
+  ungroup()%>%
+  ggplot(aes(x=reviewSentiment,fill=reviewSentiment>0))+
+  geom_histogram(binwidth = 0.1)+
+  scale_x_continuous(breaks=seq(-5,5,1))+
+  scale_fill_manual(values=c('tomato','seagreen'))+
+  guides(fill=F)+
+  theme_wsj()
+```
+# jockers
+# before
+```{r}
+before_ld %>%
+  select(ScreenName,OriginalTweet)%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output=word,input=OriginalTweet)%>%
+  inner_join(key_sentiment_jockers)%>%
+  summarize(reviewSentiment = mean(value))%>%
+  ungroup()%>%
+  summarize(min=min(reviewSentiment),max=max(reviewSentiment),median=median(reviewSentiment),mean=mean(reviewSentiment))
+
+```
+
+```{r}
+before_ld %>%
+  select(ScreenName,OriginalTweet)%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output=word,input=OriginalTweet)%>%
+  inner_join(key_sentiment_jockers)%>%
+  summarize(reviewSentiment = mean(value))%>%
+  ungroup()%>%
+  ggplot(aes(x=reviewSentiment,fill=reviewSentiment>0))+
+  geom_histogram(binwidth = 0.02)+
+  scale_x_continuous(breaks=seq(-1,1,0.2))+
+  scale_fill_manual(values=c('tomato','seagreen'))+
+  guides(fill=F)+
+  theme_wsj()
+```
+# after
+```{r}
+after_ld %>%
+  select(ScreenName,OriginalTweet)%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output=word,input=OriginalTweet)%>%
+  inner_join(key_sentiment_jockers)%>%
+  summarize(reviewSentiment = mean(value))%>%
+  ungroup()%>%
+  summarize(min=min(reviewSentiment),max=max(reviewSentiment),median=median(reviewSentiment),mean=mean(reviewSentiment))
+
+```
+
+```{r}
+after_ld%>%
+  select(ScreenName,OriginalTweet)%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output=word,input=OriginalTweet)%>%
+  inner_join(key_sentiment_jockers)%>%
+  summarize(reviewSentiment = mean(value))%>%
+  ungroup()%>%
+  ggplot(aes(x=reviewSentiment,fill=reviewSentiment>0))+
+  geom_histogram(binwidth = 0.02)+
+  scale_x_continuous(breaks=seq(-1,1,0.2))+
+  scale_fill_manual(values=c('tomato','seagreen'))+
+  guides(fill=F)+
+  theme_wsj()
+```
+# sentiment
+# before
+```{r}
+before_ld %>%
+  select(ScreenName,OriginalTweet)%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output=word,input=OriginalTweet)%>%
+  inner_join(hash_sentiment_senticnet, by = c('word'='x'))%>%
+  summarize(reviewSentiment = mean(y))%>%
+  ungroup()%>%
+  summarize(min=min(reviewSentiment),max=max(reviewSentiment),median=median(reviewSentiment),mean=mean(reviewSentiment))
+
+```
+
+```{r}
+before_ld %>%
+  select(ScreenName,OriginalTweet)%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output=word,input=OriginalTweet)%>%
+  inner_join(hash_sentiment_senticnet, by = c('word'='x'))%>%
+  summarize(reviewSentiment = mean(y))%>%
+  ungroup()%>%
+  ggplot(aes(x=reviewSentiment,fill=reviewSentiment>0))+
+  geom_histogram(binwidth = 0.01)+
+  scale_x_continuous(breaks=seq(-1,1,0.2))+
+  scale_fill_manual(values=c('tomato','seagreen'))+
+  guides(fill=F)+
+  theme_wsj()
+```
+# after
+```{r}
+after_ld %>%
+  select(ScreenName,OriginalTweet)%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output=word,input=OriginalTweet)%>%
+  inner_join(hash_sentiment_senticnet, by = c('word'='x'))%>%
+  summarize(reviewSentiment = mean(y))%>%
+  ungroup()%>%
+  summarize(min=min(reviewSentiment),max=max(reviewSentiment),median=median(reviewSentiment),mean=mean(reviewSentiment))
+
+```
+
+```{r}
+after_ld %>%
+  select(ScreenName,OriginalTweet)%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output=word,input=OriginalTweet)%>%
+  inner_join(hash_sentiment_senticnet, by = c('word'='x'))%>%
+  summarize(reviewSentiment = mean(y))%>%
+  ungroup()%>%
+  ggplot(aes(x=reviewSentiment,fill=reviewSentiment>0))+
+  geom_histogram(binwidth = 0.01)+
+  scale_x_continuous(breaks=seq(-1,1,0.2))+
+  scale_fill_manual(values=c('tomato','seagreen'))+
+  guides(fill=F)+
+  theme_wsj()
+```
+# word cloud
+# before
+```{r}
+wordcloudData = 
+  before_ld%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output=word,input=OriginalTweet)%>%
+  ungroup()%>%
+  select(ScreenName,word)%>%
+  anti_join(stop_words)%>%
+  group_by(word)%>%
+  summarize(freq = n())%>%
+  arrange(desc(freq))%>%
+  ungroup()%>%
+  data.frame()
+
+set.seed(617)
+wordcloud(words = wordcloudData$word,wordcloudData$freq,scale=c(2,0.5),max.words = 100,colors=brewer.pal(9,"Spectral"))
+
+```
+# after
+```{r}
+wordcloudData = 
+  after_ld%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output=word,input=OriginalTweet)%>%
+  ungroup()%>%
+  select(ScreenName,word)%>%
+  anti_join(stop_words)%>%
+  group_by(word)%>%
+  summarize(freq = n())%>%
+  arrange(desc(freq))%>%
+  ungroup()%>%
+  data.frame()
+set.seed(617)
+wordcloud(words = wordcloudData$word,wordcloudData$freq,scale=c(2,0.5),max.words = 100,colors=brewer.pal(9,"Spectral"))
+
+```
+# comparison cloud
+# before
+```{r}
+wordcloudData = 
+  before_ld%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output=word,input=OriginalTweet)%>%
+  ungroup()%>%
+  select(ScreenName,word)%>%
+  anti_join(stop_words)%>%
+  inner_join(get_sentiments('bing'))%>%
+  ungroup()%>%
+  count(sentiment,word,sort=T)%>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0)%>%
+  data.frame()
+rownames(wordcloudData) = wordcloudData[,'word']
+wordcloudData = wordcloudData[,c('positive','negative')]
+set.seed(617)
+comparison.cloud(term.matrix = wordcloudData,scale = c(2,0.5),max.words = 200, rot.per=0, title.size = 2)
+
+```
+# after
+```{r}
+wordcloudData = 
+  after_ld%>%
+  group_by(ScreenName)%>%
+  unnest_tokens(output=word,input=OriginalTweet)%>%
+  ungroup()%>%
+  select(ScreenName,word)%>%
+  anti_join(stop_words)%>%
+  inner_join(get_sentiments('bing'))%>%
+  ungroup()%>%
+  count(sentiment,word,sort=T)%>%
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0)%>%
+  data.frame()
+rownames(wordcloudData) = wordcloudData[,'word']
+wordcloudData = wordcloudData[,c('positive','negative')]
+set.seed(617)
+comparison.cloud(term.matrix = wordcloudData,scale = c(2,0.5),max.words = 200, rot.per=0,title.size = 2)
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```

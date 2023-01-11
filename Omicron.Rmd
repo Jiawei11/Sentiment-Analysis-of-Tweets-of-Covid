@@ -1,0 +1,433 @@
+---
+title: "5205_final"
+output: html_document
+---
+
+# In this project, we will compare people's attitude to COVID in two different time based on two datasets, one is Mar-Apr 2020, when COVID just started, and the other is from late October 2021 to Jan 2022, when a new variant with stronger infectivity but low serve rate, Omicron was founded. These two different datasets can represent people's attitude at the begining of the COVID as well as the end of the COVID.
+
+```{r, include=FALSE}
+setwd("C:/Users/white/Desktop/")
+data = read.csv("omicron_tweets.csv")
+```
+
+```{r}
+library(circlize)
+library(readr)        # reads in CSV
+library(ggplot2)      # plot library
+library(tidyverse)    # for data manipulation
+library(gridExtra)    # multiple plots in 1
+library(magick)       # attach dope image for visual
+library(scales)       # show the colors
+library(ggrepel)      # for graph repel (labels)
+library(repr)         # resize graphs
+library(naniar)       # to check for missing data
+library(lubridate)    # for date and time
+library(tm)
+library(tidytext)     # text preprocessing
+library(textdata)     # text preprocessing
+library(reshape2)
+library(knitr)
+library(grid)
+library(igraph)
+library(ggraph)
+library(ggsci)
+library(stringr)
+library(sjmisc)
+library(magick)
+library(htmlwidgets)
+library(VIM)          # missing values visual
+library(textmineR)
+library(wordcloud)
+library(wordcloud2)
+library(ggthemes)
+```
+
+```{r}
+bing = as.data.frame(get_sentiments('bing'))
+get_sentiments('bing') %>% 
+  group_by(sentiment) %>%
+  count()
+```
+
+```{r}
+unnest_tweets = data %>%
+  mutate(text = as.character(data$text)) %>%
+  unnest_tokens(word, text)
+```
+
+```{r, include=FALSE}
+tweets_words = data %>%
+  group_by(user_name) %>%
+  unnest_tokens(output = word, input = text) %>%
+  ungroup() %>%
+  mutate(row=1:n())
+as.data.frame(tweets_words)[c('user_name', 'word')]
+```
+
+```{r}
+afinn = read.table('https://raw.githubusercontent.com/pseudorational/data/master/AFINN-111.txt',header = F,sep = '\t',col.names = c('word','value'))
+```
+
+```{r}
+afinn %>%
+  group_by(value)%>%
+  count()
+```
+# score all words
+```{r}
+tweets_words %>%
+  inner_join(afinn,by = 'word')%>%
+  select('value')%>%
+  ggplot(aes(x=value))+geom_histogram()+theme_wsj()+labs(title = "Words Scoring")
+```
+# score each tweets
+```{r}
+tweets_words %>%
+  left_join(afinn,by = 'word')%>%
+  group_by(user_name)%>%
+  summarize(value = mean(value,na.rm=T))%>%
+  ungroup()%>%
+  select('user_name','value')%>%
+  ggplot(aes(x=value))+geom_histogram()+theme_wsj()+
+  scale_fill_manual(values = c('green','blue'))+labs(title = "Tweets Scoring")
+  
+```
+# sentiment score
+```{r}
+tweets_words %>%
+  inner_join(afinn,by = 'word')%>%
+  group_by(user_name)%>%
+  summarize(tweet_sentiment = mean(value,na.rm=T))%>%
+  ungroup()
+```
+
+```{r}
+tweets_words %>%
+  inner_join(afinn,by = 'word')%>%
+  group_by(user_name)%>%
+  summarize(tweet_sentiment = mean(value,na.rm=T))%>%
+  ungroup()%>%
+  summarize(Overall_Sentiment=mean(tweet_sentiment,na.rm=T))
+```
+# emotion of tweets
+```{r}
+nrc = read.table(file = 'https://raw.githubusercontent.com/pseudorational/data/master/nrc_lexicon.txt',header = F,col.names = c('word','sentiment','num'),sep = '\t'); nrc = nrc[nrc$num!=0,]; nrc$num = NULL
+```
+
+```{r}
+nrc%>%
+  group_by(sentiment)%>%
+  count()
+```
+
+```{r}
+library(RColorBrewer)
+tweets_words %>%
+  inner_join(get_sentiments('nrc'),by = 'word')%>%
+  select('sentiment')%>%
+  group_by(sentiment)%>%
+  summarize(freq=n())%>%
+  ungroup() %>%
+  ggplot(aes(x=reorder(sentiment,freq),y=freq,fill=freq))+geom_bar(position='dodge',stat='identity')+xlab('Sentiment')+ylab('Frequency')+coord_flip()+labs(title = "Sentiment Frequency")
+
+```
+```{r}
+tweets_words %>% 
+  inner_join(nrc, "word") %>% 
+  count(sentiment, word, sort=T) %>%
+  group_by(sentiment) %>% 
+  arrange(desc(n)) %>% 
+  slice(1:7) %>% 
+  
+  # Plot:
+  ggplot(aes(x=reorder(word, n), y=n)) +
+  geom_col(aes(fill=sentiment), show.legend = F) +
+  facet_wrap(~sentiment, scales = "free_y", nrow = 2, ncol = 5) +
+  coord_flip() +
+  theme(axis.text.x = element_blank()) +
+  labs(x="Word", y="Frequency", title="Top Words Distribution by Sentiments")
+```
+
+```{r}
+wordcloud_data= 
+  tweets_words %>%
+  anti_join(rbind(stop_words,c('trump','SMART')),by = 'word')%>%
+  inner_join(get_sentiments('bing'),by='word')%>%
+  count(sentiment,word,sort=T)%>%
+  ungroup()%>%
+  spread(key = sentiment,value = 'n',fill = 0)
+wordcloud_data= as.data.frame(wordcloud_data)
+rownames(wordcloud_data) = wordcloud_data[,'word']
+wordcloud_data = wordcloud_data[,c('positive','negative')]
+comparison.cloud(wordcloud_data,scale=c(2,0.5),max.words = 200,rot.per = 0, title.size = 2)  
+```
+# sort country data
+```{r}
+tweets_location = data %>%
+                        # convert to lower case
+                        mutate(user_location = tolower(user_location)) %>%
+                        group_by(user_location) %>%
+                        summarise(n = n(), .groups = "drop_last") %>%
+                        arrange(desc(n))
+tweets_location$country <- NA
+```
+# mapping location into country
+```{r}
+tweets_location <- tweets_location %>%
+                        mutate(country = ifelse(grepl("india", user_location), "India", country),
+                               country = ifelse(grepl("delhi", user_location), "India", country),
+                               country = ifelse(grepl("mumbai", user_location), "India", country),
+                               country = ifelse(grepl("bengaluru", user_location), "India", country),
+                               country = ifelse(grepl("bangalore", user_location), "India", country),
+                               country = ifelse(grepl("bhubaneswar", user_location), "India", country),
+                               country = ifelse(grepl("hyderabad", user_location), "India", country),
+                               country = ifelse(grepl("china", user_location), "China", country),
+                               country = ifelse(grepl("beijing", user_location), "China", country),
+                               country = ifelse(grepl("hong kong", user_location), "Hong Kong", country),
+                               country = ifelse(grepl("singapore", user_location), "Singapore", country),
+                               country = ifelse(grepl("australia", user_location), "Australia", country),
+                               country = ifelse(grepl("melbourne", user_location), "Australia", country),
+                               country = ifelse(grepl("sydney", user_location), "Australia", country),
+                               country = ifelse(grepl("canada", user_location), "Canada", country),
+                               country = ifelse(grepl("africa", user_location), "Africa", country),
+                               country = ifelse(grepl("england", user_location), "UK", country),
+                               country = ifelse(grepl("united kingdom", user_location), "UK", country),
+                               country = ifelse(grepl("london", user_location), "UK", country),
+                               country = ifelse(grepl("uk", user_location), "UK", country),
+                               country = ifelse(grepl("united states", user_location), "US", country),
+                               country = ifelse(grepl("usa", user_location), "US", country),
+                               country = ifelse(grepl("us", user_location), "US", country),
+                               country = ifelse(grepl("washington", user_location), "US", country),
+                               country = ifelse(grepl("new york", user_location), "US", country),
+                               country = ifelse(grepl("angeles", user_location), "US", country),
+                               country = ifelse(grepl("atlanta", user_location), "US", country),
+                               country = ifelse(grepl("california", user_location), "US", country),
+                               country = ifelse(grepl("chicago", user_location), "US", country),
+                               country = ifelse(grepl("boston", user_location), "US", country),
+                               country = ifelse(grepl("philadelphia", user_location), "US", country),
+                               country = ifelse(grepl("diego", user_location), "US", country),
+                               country = ifelse(grepl("seattle", user_location), "US", country),
+                               country = ifelse(grepl("texas", user_location), "US", country),
+                               country = ifelse(grepl("nyc", user_location), "US", country),
+                               country = ifelse(grepl("vegas", user_location), "US", country),
+                               country = ifelse(grepl("francisco", user_location), "US", country),
+                               country = ifelse(grepl("florida", user_location), "US", country),
+                               country = ifelse(grepl("dallas", user_location), "US", country),
+                               country = ifelse(grepl("denver", user_location), "US", country),
+                               country = ifelse(grepl("worldwide", user_location), "NoCountry", country),
+                               country = ifelse(grepl("global", user_location), "NoCountry", country),
+                               country = ifelse(grepl("earth", user_location), "NoCountry", country),
+                               country = ifelse(grepl("everywhere", user_location), "NoCountry", country),
+                               country = ifelse(grepl("nigeria", user_location), "Nigeria", country),
+                               country = ifelse(grepl("kenya", user_location), "Kenya", country),
+                               country = ifelse(grepl("switzerland", user_location), "Switzerland", country),
+                               country = ifelse(grepl("ireland", user_location), "Ireland", country),
+                               country = ifelse(grepl("canada", user_location), "Canada", country),
+                               country = ifelse(grepl("toronto", user_location), "Canada", country),
+                               country = ifelse(grepl("philippines", user_location), "Philippines", country),
+                               country = ifelse(grepl("malaysia", user_location), "Malaysia", country),
+                               country = ifelse(grepl("ny", user_location), "US", country),
+                               country = ifelse(grepl("nj", user_location), "US", country),
+                               country = ifelse(grepl("pa", user_location), "US", country),
+                               country = ifelse(grepl("ohio", user_location), "US", country),
+                               country = ifelse(grepl("california", user_location), "US", country),
+                               country = ifelse(grepl("silicon valley", user_location), "US", country),
+                               country = ifelse(grepl("ak", user_location), "US", country),
+                               country = ifelse(grepl("tx", user_location), "US", country),
+                               country = ifelse(grepl("va", user_location), "US", country)
+)
+```
+
+# a summary of countries
+```{r}
+table(tweets_location$country)
+```
+# plot tweets locations
+```{r}
+tweets_location %>%
+    group_by(country) %>%
+    summarise(n = n(), .groups = "drop_last") %>%
+    filter(country != "NA") %>%
+
+    ggplot(aes(x = reorder(country, n), y = n, fill=n)) +
+    geom_bar(stat = "identity") +
+    coord_flip() +
+    scale_fill_gradient(guide="none") +
+    geom_label(aes(label=n), size=2, fill="white") +
+    labs(x="Number of Tweets", y="Country",title = "Countries/Regions Location for Tweets") +
+    theme(axis.text.x = element_blank(),
+                     axis.title = element_blank())
+```
+# Sorting unnest_tweets country
+```{r}
+unnest_tweets <- data %>% 
+    mutate(text = as.character(data$text)) %>% 
+    unnest_tokens(word, text)
+unnest_tweets$country <- NA
+```
+# mapping location into country
+```{r}
+major_country = unnest_tweets %>%
+  mutate(country = ifelse(grepl("india", user_location), "India", country),
+                               country = ifelse(grepl("delhi", user_location), "India", country),
+                               country = ifelse(grepl("mumbai", user_location), "India", country),
+                               country = ifelse(grepl("bengaluru", user_location), "India", country),
+                               country = ifelse(grepl("bangalore", user_location), "India", country),
+                               country = ifelse(grepl("bhubaneswar", user_location), "India", country),
+                               country = ifelse(grepl("hyderabad", user_location), "India", country),
+                               country = ifelse(grepl("china", user_location), "China", country),
+                               country = ifelse(grepl("beijing", user_location), "China", country),
+                               country = ifelse(grepl("hong kong", user_location), "Hong Kong", country),
+                               country = ifelse(grepl("singapore", user_location), "Singapore", country),
+                               country = ifelse(grepl("australia", user_location), "Australia", country),
+                               country = ifelse(grepl("melbourne", user_location), "Australia", country),
+                               country = ifelse(grepl("sydney", user_location), "Australia", country),
+                               country = ifelse(grepl("canada", user_location), "Canada", country),
+                               country = ifelse(grepl("africa", user_location), "Africa", country),
+                               country = ifelse(grepl("england", user_location), "UK", country),
+                               country = ifelse(grepl("united kingdom", user_location), "UK", country),
+                               country = ifelse(grepl("london", user_location), "UK", country),
+                               country = ifelse(grepl("uk", user_location), "UK", country),
+                               country = ifelse(grepl("united states", user_location), "US", country),
+                               country = ifelse(grepl("usa", user_location), "US", country),
+                               country = ifelse(grepl("us", user_location), "US", country),
+                               country = ifelse(grepl("washington", user_location), "US", country),
+                               country = ifelse(grepl("new york", user_location), "US", country),
+                               country = ifelse(grepl("angeles", user_location), "US", country),
+                               country = ifelse(grepl("atlanta", user_location), "US", country),
+                               country = ifelse(grepl("california", user_location), "US", country),
+                               country = ifelse(grepl("chicago", user_location), "US", country),
+                               country = ifelse(grepl("boston", user_location), "US", country),
+                               country = ifelse(grepl("philadelphia", user_location), "US", country),
+                               country = ifelse(grepl("diego", user_location), "US", country),
+                               country = ifelse(grepl("seattle", user_location), "US", country),
+                               country = ifelse(grepl("texas", user_location), "US", country),
+                               country = ifelse(grepl("nyc", user_location), "US", country),
+                               country = ifelse(grepl("vegas", user_location), "US", country),
+                               country = ifelse(grepl("francisco", user_location), "US", country),
+                               country = ifelse(grepl("florida", user_location), "US", country),
+                               country = ifelse(grepl("dallas", user_location), "US", country),
+                               country = ifelse(grepl("denver", user_location), "US", country),
+                               country = ifelse(grepl("worldwide", user_location), "NoCountry", country),
+                               country = ifelse(grepl("global", user_location), "NoCountry", country),
+                               country = ifelse(grepl("earth", user_location), "NoCountry", country),
+                               country = ifelse(grepl("everywhere", user_location), "NoCountry", country),
+                               country = ifelse(grepl("nigeria", user_location), "Nigeria", country),
+                               country = ifelse(grepl("kenya", user_location), "Kenya", country),
+                               country = ifelse(grepl("switzerland", user_location), "Switzerland", country),
+                               country = ifelse(grepl("ireland", user_location), "Ireland", country),
+                               country = ifelse(grepl("canada", user_location), "Canada", country),
+                               country = ifelse(grepl("toronto", user_location), "Canada", country),
+                               country = ifelse(grepl("philippines", user_location), "Philippines", country),
+                               country = ifelse(grepl("malaysia", user_location), "Malaysia", country),
+                               country = ifelse(grepl("ny", user_location), "US", country),
+                               country = ifelse(grepl("nj", user_location), "US", country),
+                               country = ifelse(grepl("pa", user_location), "US", country),
+                               country = ifelse(grepl("ohio", user_location), "US", country),
+                               country = ifelse(grepl("california", user_location), "US", country),
+                               country = ifelse(grepl("silicon valley", user_location), "US", country),
+                               country = ifelse(grepl("ak", user_location), "US", country),
+                               country = ifelse(grepl("tx", user_location), "US", country),
+                               country = ifelse(grepl("va", user_location), "US", country)
+)
+```
+#filter out top countires
+```{r}
+filter = major_country %>%
+  filter(country %in% c("US", "UK", "India", "NoCountry"))
+```
+
+```{r}
+total_bing <- filter %>% 
+    inner_join(bing, by="word") %>%
+    count(country) %>% 
+    group_by(country) %>% 
+    summarise(total_tweets = sum(n), .groups = "drop_last")
+
+```
+
+```{r}
+set.seed(1009)
+to_plot <- filter %>% 
+    # get 'bing' and filter the data
+    inner_join(bing, by="word") %>%
+
+    # sum number of words per sentiment and country
+    count(sentiment, country) %>% 
+    group_by(country, sentiment) %>% 
+    summarise(sentiment_sum = sum(n), .groups = "drop_last") %>% 
+    inner_join(total_bing, by="country") %>% 
+    mutate(sentiment_perc = sentiment_sum/total_tweets) %>% 
+    select(country, sentiment, sentiment_perc)
+circos.clear()
+circos.par(gap.after = c(rep(2, length(unique(to_plot[[1]])) - 1), 15,
+                         rep(2, length(unique(to_plot[[2]])) - 1), 15), gap.degree=2)
+
+chordDiagram(to_plot, transparency = 0.2, annotationTrack = c("name", "grid"),
+             annotationTrackHeight = c(0.03, 0.06))
+title("Relationship between Sentiment and Countries")
+```
+# implementing an interactive word cloud
+```{r}
+frequentTerms <- function(text){
+  
+  # create the matrix
+  s.cor <- VCorpus(VectorSource(text))
+  s.cor.cl <- cleanCorpus(s.cor)
+  s.tdm <- TermDocumentMatrix(s.cor.cl)
+  s.tdm <- removeSparseTerms(s.tdm, 0.999)
+  m <- as.matrix(s.tdm)
+  word_freqs <- sort(rowSums(m), decreasing = T)
+  
+  # change to dataframe
+  dm <- data.frame(word=names(word_freqs), freq=word_freqs)
+  
+  return(dm)
+}
+cleanCorpus <- function(text){
+  # punctuation, whitespace, lowercase, numbers
+  text.tmp <- tm_map(text, removePunctuation)
+  text.tmp <- tm_map(text.tmp, stripWhitespace)
+  text.tmp <- tm_map(text.tmp, content_transformer(tolower))
+  text.tmp <- tm_map(text.tmp, removeNumbers)
+  
+  # removes stopwords
+  stopwords_remove <- c(stopwords("en"), c("thats","weve","hes","theres","ive","im",
+                                                "will","can","cant","dont","youve","us",
+                                                "youre","youll","theyre","whats","didnt","https", "tco"))
+  text.tmp <- tm_map(text.tmp, removeWords, stopwords_remove)
+
+  return(text.tmp)
+}
+wc_data <- frequentTerms(tweets_words$word) %>% filter(word != "covid")
+
+a <- wordcloud2(wc_data, size=1.6, minSize = 0.9, 
+            color='random-light', backgroundColor="black", shape="diamond", 
+            fontFamily="HersheySymbol")
+library(webshot)
+ webshot::install_phantomjs()
+ saveWidget(a,"1.html",selfcontained = F)
+ webshot::webshot("1.html","1.png",vwidth = 1992, vheight = 1744, delay =10)
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+
